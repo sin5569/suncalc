@@ -140,15 +140,55 @@ angle_rad = math.radians(azimuth)
 lat_offset = round(0.001 * math.cos(angle_rad), 6)
 lon_offset = round(0.001 * math.sin(angle_rad), 6)
 
-# Стрелка направления панелей
+# Конечная точка для стрелки
+end_lat = st.session_state.lat + lat_offset
+end_lon = st.session_state.lon + lon_offset
+
+# Создаем стрелку с треугольником на конце
+arrow_coordinates = [
+    [st.session_state.lat, st.session_state.lon],
+    [end_lat, end_lon]
+]
+
+# Основная линия стрелки
 folium.PolyLine(
-    locations=[
-        [st.session_state.lat, st.session_state.lon], 
-        [st.session_state.lat + lat_offset, st.session_state.lon + lon_offset]
-    ],
+    locations=arrow_coordinates,
     color="blue",
     weight=4,
     opacity=0.8
+).add_to(m)
+
+# Добавляем треугольник-стрелку на конце
+def create_arrowhead(start_lat, start_lon, end_lat, end_lon, size=0.0001):
+    """Создает треугольник-стрелку на конце линии"""
+    angle = math.atan2(end_lon - start_lon, end_lat - start_lat)
+    
+    # Точки треугольника
+    p1_lat = end_lat
+    p1_lon = end_lon
+    
+    p2_lat = end_lat - size * math.cos(angle - math.pi/6)
+    p2_lon = end_lon - size * math.sin(angle - math.pi/6)
+    
+    p3_lat = end_lat - size * math.cos(angle + math.pi/6)
+    p3_lon = end_lon - size * math.sin(angle + math.pi/6)
+    
+    return [[p1_lat, p1_lon], [p2_lat, p2_lon], [p3_lat, p3_lon], [p1_lat, p1_lon]]
+
+# Создаем и добавляем стрелку
+arrowhead_coords = create_arrowhead(
+    st.session_state.lat, st.session_state.lon, 
+    end_lat, end_lon
+)
+
+folium.PolyLine(
+    locations=arrowhead_coords,
+    color="blue",
+    weight=4,
+    opacity=0.8,
+    fill=True,
+    fill_color="blue",
+    fill_opacity=0.8
 ).add_to(m)
 
 # Отображаем карту и получаем события
@@ -169,8 +209,8 @@ if map_data and map_data.get("last_clicked"):
     st.session_state.lon = clicked_lon
     st.rerun()
 
-# Информация о местоположении
-col1, col2, col3 = st.columns(3)
+# Информация о местоположении и ориентации
+col1, col2, col3, col4 = st.columns(4)
 with col1:
     st.info(f"**Широта:** {st.session_state.lat:.6f}")
 with col2:
@@ -185,6 +225,8 @@ with col3:
             min_distance = distance
             nearest_city = city
     st.info(f"**Ближайший город:** {nearest_city}")
+with col4:
+    st.info(f"**Направление:** {direction}")
 
 # ===== ИНДИКАТОР ЗАГРУЗКИ =====
 st.header("⚡ Расчет солнечной генерации")
