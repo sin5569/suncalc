@@ -135,9 +135,11 @@ folium.Marker(
     icon=folium.Icon(color="red", icon="circle", prefix="fa")
 ).add_to(m)
 
-# Расчет направления стрелки - ИСПРАВЛЕНО: стрелочка в сторону направления панелей
-# В PVGIS: 0° = Юг, 90° = Запад, 180° = Север, 270° = Восток
-angle_rad = math.radians(azimuth)
+# ИСПРАВЛЕННЫЙ РАСЧЕТ: инвертируем направление для правильного отображения стрелки
+# В PVGIS азимут указывает направление ПАНЕЛЕЙ, но стрелка должна показывать куда они смотрят
+# Для этого используем противоположное направление (azimuth + 180) % 360
+corrected_azimuth = (azimuth + 180) % 360
+angle_rad = math.radians(corrected_azimuth)
 lat_offset = round(0.001 * math.cos(angle_rad), 6)
 lon_offset = round(0.001 * math.sin(angle_rad), 6)
 
@@ -183,13 +185,6 @@ arrowhead_coords = create_arrowhead(
     end_lat, end_lon
 )
 
-folium.PolyLine(
-    locations=arrowhead_coords,
-    color="blue",
-    weight=4,
-    opacity=0.8
-).add_to(m)
-
 # Добавляем заливку для стрелки
 folium.Polygon(
     locations=arrowhead_coords,
@@ -198,7 +193,7 @@ folium.Polygon(
     opacity=0.8,
     fill=True,
     fill_color="blue",
-    fill_opacity=0.6
+    fill_opacity=0.8
 ).add_to(m)
 
 # Отображаем карту и получаем события
