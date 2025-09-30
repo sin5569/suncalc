@@ -99,6 +99,26 @@ def parse_pvgis_hourly_data(data):
     hourly_data = data["outputs"]["hourly"]
     df = pd.DataFrame(hourly_data)
     
+    # Проверяем доступные колонки
+    st.sidebar.info(f"Доступные колонки: {list(df.columns)}")
+    
+    # Определяем колонку с генерацией (может называться по-разному)
+    power_column = None
+    possible_columns = ['P', 'P_direct', 'P_avg', 'electricity', 'generation']
+    
+    for col in possible_columns:
+        if col in df.columns:
+            power_column = col
+            break
+    
+    if power_column is None and len(df.columns) > 1:
+        # Берем вторую колонку (обычно первая - время, вторая - генерация)
+        power_column = df.columns[1]
+    
+    if power_column is None:
+        st.error("Не удалось найти колонку с данными генерации")
+        return None
+    
     # Преобразуем время
     df['time'] = pd.to_datetime(df['time'], format='%Y%m%d:%H%M')
     df['date'] = df['time'].dt.date
@@ -107,6 +127,9 @@ def parse_pvgis_hourly_data(data):
     df['hour'] = df['time'].dt.hour
     df['day_of_year'] = df['time'].dt.dayofyear
     
+    # Сохраняем название колонки с мощностью
+    df['power'] = df[power_column]
+    
     return df
 
 def calculate_periods_generation(df, peak_power):
@@ -114,29 +137,30 @@ def calculate_periods_generation(df, peak_power):
     if df is None:
         return None
     
-    # Почасовая генерация
-    hourly = df.groupby(['date', 'hour'])['P'].sum().reset_index()
+    # Почасовая генерация (в Ватт-часах, переводим в кВт·ч)
+    hourly = df.groupby(['date', 'hour'])['power'].sum().reset_index()
+    hourly['power_kwh'] = hourly['power'] / 1000  # Переводим в кВт·ч
     
     # Дневная генерация
-    daily = df.groupby('date')['P'].sum().reset_index()
-    daily['P'] = daily['P'] / 1000  # Переводим в кВт·ч
+    daily = df.groupby('date')['power'].sum().reset_index()
+    daily['power_kwh'] = daily['power'] / 1000  # Переводим в кВт·ч
     
     # Недельная генерация
-    weekly = df.groupby('week')['P'].sum().reset_index()
-    weekly['P'] = weekly['P'] / 1000  # Переводим в кВт·ч
+    weekly = df.groupby('week')['power'].sum().reset_index()
+    weekly['power_kwh'] = weekly['power'] / 1000  # Переводим в кВт·ч
     
     # Месячная генерация
-    monthly = df.groupby('month')['P'].sum().reset_index()
-    monthly['P'] = monthly['P'] / 1000  # Переводим в кВт·ч
+    monthly = df.groupby('month')['power'].sum().reset_index()
+    monthly['power_kwh'] = monthly['power'] / 1000  # Переводим в кВт·ч
     
     # Годовая генерация
-    yearly_total = df['P'].sum() / 1000  # Переводим в кВт·ч
+    yearly_total = df['power'].sum() / 1000  # Переводим в кВт·ч
     
     # Средние показатели
-    avg_hourly = df['P'].mean() / 1000  # кВт·ч
-    avg_daily = daily['P'].mean()
-    avg_weekly = weekly['P'].mean()
-    avg_monthly = monthly['P'].mean()
+    avg_hourly = df['power'].mean() / 1000  # кВт·ч
+    avg_daily = daily['power_kwh'].mean()
+    avg_weekly = weekly['power_kwh'].mean()
+    avg_monthly = monthly['power_kwh'].mean()
     
     return {
         'hourly': hourly,
@@ -148,10 +172,20 @@ def calculate_periods_generation(df, peak_power):
         'avg_daily': avg_daily,
         'avg_weekly': avg_weekly,
         'avg_monthly': avg_monthly,
-        'raw_data': df
+        'raw_data': df,
+        'power_column': 'power'
     }
 
+# Парсим данные
 df_hourly = parse_pvgis_hourly_data(data)
+
+# Отладочная информация
+if df_hourly is not None:
+    st.sidebar.success(f"Данные успешно загружены: {len(df_hourly)} строк")
+    st.sidebar.write(f"Диапазон дат: {df_hourly['date'].min()} - {df_hourly['date'].max()}")
+else:
+    st.sidebar.error("Не удалось загрузить данные")
+
 periods_data = calculate_periods_generation(df_hourly, peak_power) if df_hourly is not None else None
 
 # ===== ОСНОВНОЙ ИНТЕРФЕЙС =====
@@ -229,7 +263,7 @@ if periods_data is not None:
         monthly_data = periods_data['monthly'].copy()
         monthly_data['month_name'] = [months_ru[i-1] for i in monthly_data['month']]
         
-        bars = ax1.bar(monthly_data['month_name'], monthly_data['P'], 
+        bars = ax1.bar(monthly_data['month_name'], monthly_data['power_kwh'], 
                       color=plt.cm.viridis(np.linspace(0, 1, 12)),
                       alpha=0.7)
         
@@ -244,10 +278,10 @@ if periods_data is not None:
         
         # Круговая диаграмма - распределение по сезонам
         seasons = {
-            'Зима (Дек-Фев)': monthly_data[monthly_data['month'].isin([12, 1, 2])]['P'].sum(),
-            'Весна (Мар-Май)': monthly_data[monthly_data['month'].isin([3, 4, 5])]['P'].sum(),
-            'Лето (Июн-Авг)': monthly_data[monthly_data['month'].isin([6, 7, 8])]['P'].sum(),
-            'Осень (Сен-Ноя)': monthly_data[monthly_data['month'].isin([9, 10, 11])]['P'].sum()
+            'Зима (Дек-Фев)': monthly_data[monthly_data['month'].isin([12, 1, 2])]['power_kwh'].sum(),
+            'Весна (Мар-Май)': monthly_data[monthly_data['month'].isin([3, 4, 5])]['power_kwh'].sum(),
+            'Лето (Июн-Авг)': monthly_data[monthly_data['month'].isin([6, 7, 8])]['power_kwh'].sum(),
+            'Осень (Сен-Ноя)': monthly_data[monthly_data['month'].isin([9, 10, 11])]['power_kwh'].sum()
         }
         
         ax2.pie(seasons.values(), labels=seasons.keys(), autopct='%1.1f%%', 
@@ -258,8 +292,10 @@ if periods_data is not None:
         st.pyplot(fig_year)
         
         # Таблица годовых данных
-        st.dataframe(monthly_data.rename(columns={'P': 'Генерация (кВт·ч)', 'month_name': 'Месяц'}), 
-                    hide_index=True, use_container_width=True)
+        display_monthly = monthly_data[['month_name', 'power_kwh']].rename(
+            columns={'month_name': 'Месяц', 'power_kwh': 'Генерация (кВт·ч)'}
+        )
+        st.dataframe(display_monthly, hide_index=True, use_container_width=True)
     
     with tab2:
         st.subheader("Месячная генерация")
@@ -270,23 +306,23 @@ if periods_data is not None:
         
         # Данные за выбранный месяц
         month_data = periods_data['raw_data'][periods_data['raw_data']['month'] == month_num]
-        daily_month = month_data.groupby('date')['P'].sum().reset_index()
-        daily_month['P'] = daily_month['P'] / 1000  # кВт·ч
+        daily_month = month_data.groupby('date')['power'].sum().reset_index()
+        daily_month['power_kwh'] = daily_month['power'] / 1000  # кВт·ч
         
         fig_month, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
         
         # Дневная генерация в месяце
-        ax1.plot(daily_month['date'], daily_month['P'], 'o-', linewidth=2, markersize=4)
+        ax1.plot(daily_month['date'], daily_month['power_kwh'], 'o-', linewidth=2, markersize=4)
         ax1.set_title(f'Дневная генерация - {selected_month}')
         ax1.set_ylabel('кВт·ч/день')
         ax1.grid(True, alpha=0.3)
         ax1.tick_params(axis='x', rotation=45)
         
         # Средняя часовая генерация по дням месяца
-        hourly_avg = month_data.groupby('hour')['P'].mean().reset_index()
-        hourly_avg['P'] = hourly_avg['P'] / 1000  # кВт·ч
+        hourly_avg = month_data.groupby('hour')['power'].mean().reset_index()
+        hourly_avg['power_kwh'] = hourly_avg['power'] / 1000  # кВт·ч
         
-        ax2.bar(hourly_avg['hour'], hourly_avg['P'], alpha=0.7, color='orange')
+        ax2.bar(hourly_avg['hour'], hourly_avg['power_kwh'], alpha=0.7, color='orange')
         ax2.set_title(f'Средняя часовая генерация - {selected_month}')
         ax2.set_xlabel('Час дня')
         ax2.set_ylabel('кВт·ч/час')
@@ -295,8 +331,11 @@ if periods_data is not None:
         plt.tight_layout()
         st.pyplot(fig_month)
         
-        st.metric(f"Общая генерация за {selected_month}", f"{daily_month['P'].sum():.0f} кВт·ч")
-        st.metric(f"Средняя дневная генерация", f"{daily_month['P'].mean():.1f} кВт·ч")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric(f"Общая генерация за {selected_month}", f"{daily_month['power_kwh'].sum():.0f} кВт·ч")
+        with col2:
+            st.metric(f"Средняя дневная генерация", f"{daily_month['power_kwh'].mean():.1f} кВт·ч")
     
     with tab3:
         st.subheader("Недельная генерация")
@@ -305,14 +344,14 @@ if periods_data is not None:
         
         weekly_data = periods_data['weekly'].copy()
         
-        ax.bar(weekly_data['week'], weekly_data['P'], alpha=0.7, color='green')
+        ax.bar(weekly_data['week'], weekly_data['power_kwh'], alpha=0.7, color='green')
         ax.set_title('Недельная генерация в течение года')
         ax.set_xlabel('Номер недели')
         ax.set_ylabel('кВт·ч/неделю')
         ax.grid(True, alpha=0.3)
         
         # Добавляем линию тренда
-        z = np.polyfit(weekly_data['week'], weekly_data['P'], 2)
+        z = np.polyfit(weekly_data['week'], weekly_data['power_kwh'], 2)
         p = np.poly1d(z)
         ax.plot(weekly_data['week'], p(weekly_data['week']), "r--", alpha=0.8)
         
@@ -321,63 +360,60 @@ if periods_data is not None:
         
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("Максимальная неделя", f"{weekly_data['P'].max():.0f} кВт·ч")
+            st.metric("Максимальная неделя", f"{weekly_data['power_kwh'].max():.0f} кВт·ч")
         with col2:
-            st.metric("Минимальная неделя", f"{weekly_data['P'].min():.0f} кВт·ч")
+            st.metric("Минимальная неделя", f"{weekly_data['power_kwh'].min():.0f} кВт·ч")
         with col3:
-            st.metric("Стандартное отклонение", f"{weekly_data['P'].std():.0f} кВт·ч")
+            st.metric("Стандартное отклонение", f"{weekly_data['power_kwh'].std():.0f} кВт·ч")
     
     with tab4:
         st.subheader("Суточная и почасовая генерация")
         
         # Выбор дня для детального анализа
         available_dates = periods_data['daily']['date'].unique()
-        selected_date = st.selectbox("Выберите дату:", available_dates[:10])  # Показываем первые 10 дней
-        
-        # Данные за выбранный день
-        day_data = periods_data['raw_data'][periods_data['raw_data']['date'] == selected_date]
-        day_data['P_kwh'] = day_data['P'] / 1000  # кВт·ч
-        
-        fig_day, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
-        
-        # Почасовая генерация
-        ax1.bar(day_data['hour'], day_data['P_kwh'], alpha=0.7, color='red')
-        ax1.set_title(f'Почасовая генерация - {selected_date}')
-        ax1.set_xlabel('Час дня')
-        ax1.set_ylabel('кВт·ч/час')
-        ax1.grid(True, alpha=0.3)
-        
-        # Накопительная генерация за день
-        cumulative = day_data['P_kwh'].cumsum()
-        ax2.plot(day_data['hour'], cumulative, 'o-', linewidth=2, color='purple')
-        ax2.set_title(f'Накопительная генерация - {selected_date}')
-        ax2.set_xlabel('Час дня')
-        ax2.set_ylabel('кВт·ч (накопит.)')
-        ax2.grid(True, alpha=0.3)
-        ax2.fill_between(day_data['hour'], cumulative, alpha=0.3, color='purple')
-        
-        plt.tight_layout()
-        st.pyplot(fig_day)
-        
-        total_day = day_data['P_kwh'].sum()
-        peak_hour = day_data.loc[day_data['P_kwh'].idxmax()]
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Общая дневная генерация", f"{total_day:.1f} кВт·ч")
-        with col2:
-            st.metric("Пиковый час", f"Час {int(peak_hour['hour'])}:00")
-        with col3:
-            st.metric("Пиковая мощность", f"{peak_hour['P_kwh']:.2f} кВт·ч")
-    
-    # ===== ТАБЛИЦА С ОСНОВНЫМИ ДАННЫМИ =====
-    with st.expander("📋 Полная таблица данных"):
-        display_df = periods_data['raw_data'].copy()
-        display_df['P_kwh'] = display_df['P'] / 1000
-        display_df = display_df[['time', 'date', 'hour', 'P_kwh']].rename(columns={
-            'time': 'Время', 'date': 'Дата', 'hour': 'Час', 'P_kwh': 'Генерация (кВт·ч)'
-        })
-        st.dataframe(display_df.head(100), use_container_width=True)  # Показываем первые 100 строк
+        if len(available_dates) > 0:
+            selected_date = st.selectbox("Выберите дату:", available_dates[:10])  # Показываем первые 10 дней
+            
+            # Данные за выбранный день
+            day_data = periods_data['raw_data'][periods_data['raw_data']['date'] == selected_date]
+            day_data['power_kwh'] = day_data['power'] / 1000  # кВт·ч
+            
+            fig_day, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
+            
+            # Почасовая генерация
+            ax1.bar(day_data['hour'], day_data['power_kwh'], alpha=0.7, color='red')
+            ax1.set_title(f'Почасовая генерация - {selected_date}')
+            ax1.set_xlabel('Час дня')
+            ax1.set_ylabel('кВт·ч/час')
+            ax1.grid(True, alpha=0.3)
+            
+            # Накопительная генерация за день
+            cumulative = day_data['power_kwh'].cumsum()
+            ax2.plot(day_data['hour'], cumulative, 'o-', linewidth=2, color='purple')
+            ax2.set_title(f'Накопительная генерация - {selected_date}')
+            ax2.set_xlabel('Час дня')
+            ax2.set_ylabel('кВт·ч (накопит.)')
+            ax2.grid(True, alpha=0.3)
+            ax2.fill_between(day_data['hour'], cumulative, alpha=0.3, color='purple')
+            
+            plt.tight_layout()
+            st.pyplot(fig_day)
+            
+            total_day = day_data['power_kwh'].sum()
+            if len(day_data) > 0:
+                peak_hour = day_data.loc[day_data['power_kwh'].idxmax()]
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Общая дневная генерация", f"{total_day:.1f} кВт·ч")
+                with col2:
+                    st.metric("Пиковый час", f"Час {int(peak_hour['hour'])}:00")
+                with col3:
+                    st.metric("Пиковая мощность", f"{peak_hour['power_kwh']:.2f} кВт·ч")
+            else:
+                st.warning("Нет данных за выбранный день")
+        else:
+            st.warning("Нет доступных данных по дням")
 
 else:
     st.error("❌ Не удалось получить данные от PVGIS. Проверьте параметры и подключение к интернету.")
