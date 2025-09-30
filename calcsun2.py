@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 
 # Настройка страницы
 st.set_page_config(layout="wide", page_title="☀️ Солнечная генерация")
-st.title("☀️ Динамический калькулятор солнечной генерации")
+st.title("☀️ Калькулятор солнечной генерации")
 
 # ===== КЭШИРОВАНИЕ ДАННЫХ =====
 @st.cache_data(ttl=3600)  # Кэш на 1 час
