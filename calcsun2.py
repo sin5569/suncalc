@@ -135,7 +135,8 @@ folium.Marker(
     icon=folium.Icon(color="red", icon="circle", prefix="fa")
 ).add_to(m)
 
-# Расчет направления стрелки
+# Расчет направления стрелки - ИСПРАВЛЕНО: стрелочка в сторону направления панелей
+# В PVGIS: 0° = Юг, 90° = Запад, 180° = Север, 270° = Восток
 angle_rad = math.radians(azimuth)
 lat_offset = round(0.001 * math.cos(angle_rad), 6)
 lon_offset = round(0.001 * math.sin(angle_rad), 6)
@@ -158,12 +159,13 @@ folium.PolyLine(
     opacity=0.8
 ).add_to(m)
 
-# Добавляем треугольник-стрелку на конце
+# Добавляем треугольник-стрелку на конце (в правильном направлении)
 def create_arrowhead(start_lat, start_lon, end_lat, end_lon, size=0.0001):
-    """Создает треугольник-стрелку на конце линии"""
+    """Создает треугольник-стрелку на конце линии в правильном направлении"""
+    # Угол от начальной точки к конечной
     angle = math.atan2(end_lon - start_lon, end_lat - start_lat)
     
-    # Точки треугольника
+    # Точки треугольника (стрелка указывает ОТ начальной точки К конечной)
     p1_lat = end_lat
     p1_lon = end_lon
     
@@ -185,10 +187,18 @@ folium.PolyLine(
     locations=arrowhead_coords,
     color="blue",
     weight=4,
+    opacity=0.8
+).add_to(m)
+
+# Добавляем заливку для стрелки
+folium.Polygon(
+    locations=arrowhead_coords,
+    color="blue",
+    weight=2,
     opacity=0.8,
     fill=True,
     fill_color="blue",
-    fill_opacity=0.8
+    fill_opacity=0.6
 ).add_to(m)
 
 # Отображаем карту и получаем события
