@@ -100,8 +100,8 @@ def parse_pvgis_hourly_data(data):
     df = pd.DataFrame(hourly_data)
     
     # Отладочная информация о доступных колонках
-    available_columns = list(df.columns)
-    st.sidebar.info(f"Доступные колонки: {available_columns}")
+    #available_columns = list(df.columns)
+    #st.sidebar.info(f"Доступные колонки: {available_columns}")
     
     # Объяснение колонок PVGIS
     column_explanations = {
