@@ -99,25 +99,23 @@ def parse_pvgis_hourly_data(data):
     hourly_data = data["outputs"]["hourly"]
     df = pd.DataFrame(hourly_data)
     
-    # Проверяем доступные колонки
-    st.sidebar.info(f"Доступные колонки: {list(df.columns)}")
+    # Отладочная информация о доступных колонках
+    available_columns = list(df.columns)
+    st.sidebar.info(f"Доступные колонки: {available_columns}")
     
-    # Определяем колонку с генерацией (может называться по-разному)
-    power_column = None
-    possible_columns = ['P', 'P_direct', 'P_avg', 'electricity', 'generation']
+    # Объяснение колонок PVGIS
+    column_explanations = {
+        'time': 'Время',
+        'G(i)': 'Солнечная радиация на наклонной поверхности (Вт/м²)',
+        'H_sun': 'Высота солнца над горизонтом (градусы)',
+        'T2m': 'Температура воздуха на высоте 2м (°C)',
+        'WS10m': 'Скорость ветра на высоте 10м (м/с)',
+        'Int': 'Интенсивность солнечной радиации'
+    }
     
-    for col in possible_columns:
-        if col in df.columns:
-            power_column = col
-            break
-    
-    if power_column is None and len(df.columns) > 1:
-        # Берем вторую колонку (обычно первая - время, вторая - генерация)
-        power_column = df.columns[1]
-    
-    if power_column is None:
-        st.error("Не удалось найти колонку с данными генерации")
-        return None
+    # Используем G(i) - солнечную радиацию для расчета генерации
+    # Генерация = (G(i) * Площадь панели * Эффективность) / 1000
+    # Для упрощения: считаем что G(i) в Вт/м² уже учитывает эффективность системы
     
     # Преобразуем время
     df['time'] = pd.to_datetime(df['time'], format='%Y%m%d:%H%M')
@@ -127,8 +125,18 @@ def parse_pvgis_hourly_data(data):
     df['hour'] = df['time'].dt.hour
     df['day_of_year'] = df['time'].dt.dayofyear
     
-    # Сохраняем название колонки с мощностью
-    df['power'] = df[power_column]
+    # Рассчитываем генерацию энергии на основе солнечной радиации
+    # Предполагаем стандартную эффективность панелей ~15-20%
+    system_efficiency = 0.16  # 16% КПД системы
+    
+    # Площадь панелей (примерно 6.5 м² на 1 кВт мощности)
+    panel_area = peak_power * 6.5  # м²
+    
+    # Генерация в Вт·ч за час
+    df['power_wh'] = df['G(i)'] * panel_area * system_efficiency
+    
+    # Генерация в кВт·ч за час
+    df['power_kwh'] = df['power_wh'] / 1000
     
     return df
 
@@ -137,27 +145,39 @@ def calculate_periods_generation(df, peak_power):
     if df is None:
         return None
     
-    # Почасовая генерация (в Ватт-часах, переводим в кВт·ч)
-    hourly = df.groupby(['date', 'hour'])['power'].sum().reset_index()
-    hourly['power_kwh'] = hourly['power'] / 1000  # Переводим в кВт·ч
+    # Почасовая генерация
+    hourly = df.groupby(['date', 'hour']).agg({
+        'power_kwh': 'sum',
+        'G(i)': 'mean',
+        'T2m': 'mean'
+    }).reset_index()
     
     # Дневная генерация
-    daily = df.groupby('date')['power'].sum().reset_index()
-    daily['power_kwh'] = daily['power'] / 1000  # Переводим в кВт·ч
+    daily = df.groupby('date').agg({
+        'power_kwh': 'sum',
+        'G(i)': 'mean',
+        'T2m': 'mean'
+    }).reset_index()
     
     # Недельная генерация
-    weekly = df.groupby('week')['power'].sum().reset_index()
-    weekly['power_kwh'] = weekly['power'] / 1000  # Переводим в кВт·ч
+    weekly = df.groupby('week').agg({
+        'power_kwh': 'sum',
+        'G(i)': 'mean',
+        'T2m': 'mean'
+    }).reset_index()
     
     # Месячная генерация
-    monthly = df.groupby('month')['power'].sum().reset_index()
-    monthly['power_kwh'] = monthly['power'] / 1000  # Переводим в кВт·ч
+    monthly = df.groupby('month').agg({
+        'power_kwh': 'sum',
+        'G(i)': 'mean',
+        'T2m': 'mean'
+    }).reset_index()
     
     # Годовая генерация
-    yearly_total = df['power'].sum() / 1000  # Переводим в кВт·ч
+    yearly_total = df['power_kwh'].sum()
     
     # Средние показатели
-    avg_hourly = df['power'].mean() / 1000  # кВт·ч
+    avg_hourly = df['power_kwh'].mean()
     avg_daily = daily['power_kwh'].mean()
     avg_weekly = weekly['power_kwh'].mean()
     avg_monthly = monthly['power_kwh'].mean()
@@ -172,8 +192,7 @@ def calculate_periods_generation(df, peak_power):
         'avg_daily': avg_daily,
         'avg_weekly': avg_weekly,
         'avg_monthly': avg_monthly,
-        'raw_data': df,
-        'power_column': 'power'
+        'raw_data': df
     }
 
 # Парсим данные
@@ -181,10 +200,11 @@ df_hourly = parse_pvgis_hourly_data(data)
 
 # Отладочная информация
 if df_hourly is not None:
-    st.sidebar.success(f"Данные успешно загружены: {len(df_hourly)} строк")
-    st.sidebar.write(f"Диапазон дат: {df_hourly['date'].min()} - {df_hourly['date'].max()}")
+    st.sidebar.success(f"✅ Данные успешно загружены: {len(df_hourly)} строк")
+    st.sidebar.write(f"📅 Диапазон дат: {df_hourly['date'].min()} - {df_hourly['date'].max()}")
+    st.sidebar.write(f"⚡ Средняя генерация: {df_hourly['power_kwh'].mean():.2f} кВт·ч/час")
 else:
-    st.sidebar.error("Не удалось загрузить данные")
+    st.sidebar.error("❌ Не удалось загрузить данные")
 
 periods_data = calculate_periods_generation(df_hourly, peak_power) if df_hourly is not None else None
 
@@ -270,6 +290,7 @@ if periods_data is not None:
         ax1.set_title('Генерация по месяцам')
         ax1.set_ylabel('кВт·ч')
         ax1.grid(True, alpha=0.3)
+        plt.xticks(rotation=45)
         
         for bar in bars:
             height = bar.get_height()
@@ -292,8 +313,12 @@ if periods_data is not None:
         st.pyplot(fig_year)
         
         # Таблица годовых данных
-        display_monthly = monthly_data[['month_name', 'power_kwh']].rename(
-            columns={'month_name': 'Месяц', 'power_kwh': 'Генерация (кВт·ч)'}
+        display_monthly = monthly_data[['month_name', 'power_kwh', 'G(i)']].rename(
+            columns={
+                'month_name': 'Месяц', 
+                'power_kwh': 'Генерация (кВт·ч)',
+                'G(i)': 'Средняя радиация (Вт/м²)'
+            }
         )
         st.dataframe(display_monthly, hide_index=True, use_container_width=True)
     
@@ -306,21 +331,25 @@ if periods_data is not None:
         
         # Данные за выбранный месяц
         month_data = periods_data['raw_data'][periods_data['raw_data']['month'] == month_num]
-        daily_month = month_data.groupby('date')['power'].sum().reset_index()
-        daily_month['power_kwh'] = daily_month['power'] / 1000  # кВт·ч
+        daily_month = month_data.groupby('date').agg({
+            'power_kwh': 'sum',
+            'G(i)': 'mean'
+        }).reset_index()
         
         fig_month, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
         
         # Дневная генерация в месяце
-        ax1.plot(daily_month['date'], daily_month['power_kwh'], 'o-', linewidth=2, markersize=4)
+        ax1.plot(daily_month['date'], daily_month['power_kwh'], 'o-', linewidth=2, markersize=4, color='blue')
         ax1.set_title(f'Дневная генерация - {selected_month}')
         ax1.set_ylabel('кВт·ч/день')
         ax1.grid(True, alpha=0.3)
         ax1.tick_params(axis='x', rotation=45)
         
         # Средняя часовая генерация по дням месяца
-        hourly_avg = month_data.groupby('hour')['power'].mean().reset_index()
-        hourly_avg['power_kwh'] = hourly_avg['power'] / 1000  # кВт·ч
+        hourly_avg = month_data.groupby('hour').agg({
+            'power_kwh': 'mean',
+            'G(i)': 'mean'
+        }).reset_index()
         
         ax2.bar(hourly_avg['hour'], hourly_avg['power_kwh'], alpha=0.7, color='orange')
         ax2.set_title(f'Средняя часовая генерация - {selected_month}')
@@ -353,7 +382,7 @@ if periods_data is not None:
         # Добавляем линию тренда
         z = np.polyfit(weekly_data['week'], weekly_data['power_kwh'], 2)
         p = np.poly1d(z)
-        ax.plot(weekly_data['week'], p(weekly_data['week']), "r--", alpha=0.8)
+        ax.plot(weekly_data['week'], p(weekly_data['week']), "r--", alpha=0.8, linewidth=2)
         
         plt.tight_layout()
         st.pyplot(fig_week)
@@ -372,11 +401,10 @@ if periods_data is not None:
         # Выбор дня для детального анализа
         available_dates = periods_data['daily']['date'].unique()
         if len(available_dates) > 0:
-            selected_date = st.selectbox("Выберите дату:", available_dates[:10])  # Показываем первые 10 дней
+            selected_date = st.selectbox("Выберите дату:", available_dates[:10])
             
             # Данные за выбранный день
             day_data = periods_data['raw_data'][periods_data['raw_data']['date'] == selected_date]
-            day_data['power_kwh'] = day_data['power'] / 1000  # кВт·ч
             
             fig_day, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
             
@@ -389,7 +417,7 @@ if periods_data is not None:
             
             # Накопительная генерация за день
             cumulative = day_data['power_kwh'].cumsum()
-            ax2.plot(day_data['hour'], cumulative, 'o-', linewidth=2, color='purple')
+            ax2.plot(day_data['hour'], cumulative, 'o-', linewidth=2, color='purple', markersize=4)
             ax2.set_title(f'Накопительная генерация - {selected_date}')
             ax2.set_xlabel('Час дня')
             ax2.set_ylabel('кВт·ч (накопит.)')
@@ -410,10 +438,23 @@ if periods_data is not None:
                     st.metric("Пиковый час", f"Час {int(peak_hour['hour'])}:00")
                 with col3:
                     st.metric("Пиковая мощность", f"{peak_hour['power_kwh']:.2f} кВт·ч")
-            else:
-                st.warning("Нет данных за выбранный день")
-        else:
-            st.warning("Нет доступных данных по дням")
+    
+    # ===== ДОПОЛНИТЕЛЬНАЯ ИНФОРМАЦИЯ =====
+    with st.expander("🔍 Объяснение данных PVGIS"):
+        st.write("""
+        **Колонки данных от PVGIS:**
+        - `time` - Время измерения
+        - `G(i)` - Солнечная радиация на наклонной поверхности (Вт/м²) - используется для расчета генерации
+        - `H_sun` - Высота солнца над горизонтом (градусы)
+        - `T2m` - Температура воздуха на высоте 2м (°C)
+        - `WS10m` - Скорость ветра на высоте 10м (м/с)
+        - `Int` - Интенсивность солнечной радиации
+        
+        **Расчет генерации:**
+        Генерация = G(i) × Площадь панелей × Эффективность системы
+        - Площадь панелей: ~6.5 м² на 1 кВт мощности
+        - Эффективность системы: ~16% (учитывает КПД панелей, инвертора, потери)
+        """)
 
 else:
     st.error("❌ Не удалось получить данные от PVGIS. Проверьте параметры и подключение к интернету.")
