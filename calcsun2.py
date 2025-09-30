@@ -3,7 +3,7 @@ import requests
 import pandas as pd
 import matplotlib.pyplot as plt
 import folium
-from streamlit_folium import st_folium, folium_static
+from streamlit_folium import st_folium
 import math
 import numpy as np
 from datetime import datetime, timedelta
@@ -37,8 +37,6 @@ if 'lat' not in st.session_state:
     st.session_state.lat = 49.5883  # Полтава
 if 'lon' not in st.session_state:
     st.session_state.lon = 34.5514  # Полтава
-if 'map_clicked' not in st.session_state:
-    st.session_state.map_clicked = False
 
 # ===== СИДЕБАР - ПАРАМЕТРЫ СИСТЕМЫ =====
 st.sidebar.header("📍 Локация и ориентация панелей")
@@ -57,26 +55,21 @@ cities = {
 selected_city = st.sidebar.selectbox("Быстрый выбор города:", list(cities.keys()))
 if st.sidebar.button("Применить выбранный город"):
     st.session_state.lat, st.session_state.lon = cities[selected_city]
-    st.session_state.map_clicked = False
     st.rerun()
 
 st.sidebar.markdown("---")
 st.sidebar.write("**Или выберите на карте:**")
-st.sidebar.info("🗺️ Нажмите на карту справа для выбора местоположения")
+st.sidebar.info("🗺️ Нажмите на карту для выбора местоположения")
 
-# Точная настройка координат
+# Текущие координаты в сайдбаре
 st.sidebar.write("**Текущие координаты:**")
-col1, col2 = st.sidebar.columns(2)
-with col1:
-    lat = st.number_input("Широта", value=st.session_state.lat, format="%.6f", key="lat_input")
-with col2:
-    lon = st.number_input("Долгота", value=st.session_state.lon, format="%.6f", key="lon_input")
+st.sidebar.success(f"Широта: {st.session_state.lat:.6f}")
+st.sidebar.success(f"Долгота: {st.session_state.lon:.6f}")
 
-# Кнопка для применения ручного ввода координат
-if st.sidebar.button("Применить координаты"):
-    st.session_state.lat = lat
-    st.session_state.lon = lon
-    st.session_state.map_clicked = False
+# Кнопка для сброса к Полтаве
+if st.sidebar.button("🔄 Сбросить к Полтаве"):
+    st.session_state.lat = 49.5883
+    st.session_state.lon = 34.5514
     st.rerun()
 
 st.sidebar.markdown("---")
@@ -126,95 +119,72 @@ selected_year = st.sidebar.selectbox(
 if selected_year < 2015:
     st.sidebar.warning("⚠️ Используются относительно старые данные. Рекомендуется 2015-2020 годы.")
 
-# ===== ИНТЕРАКТИВНАЯ КАРТА ДЛЯ ВЫБОРА МЕСТОПОЛОЖЕНИЯ =====
-st.header("🗺️ Выбор местоположения на карте")
+# ===== ИНТЕРАКТИВНАЯ КАРТА С ОРИЕНТАЦИЕЙ ПАНЕЛЕЙ =====
+st.header("🗺️ Карта местоположения и ориентации панелей")
 
-col_map, col_info = st.columns([2, 1])
+# Создаем карту
+m = folium.Map(
+    location=[st.session_state.lat, st.session_state.lon], 
+    zoom_start=15,
+    control_scale=True
+)
 
-with col_map:
-    # Создаем карту для выбора местоположения
-    m = folium.Map(
-        location=[st.session_state.lat, st.session_state.lon], 
-        zoom_start=10,
-        control_scale=True
-    )
-    
-    # Добавляем маркер текущего местоположения
-    folium.Marker(
-        [st.session_state.lat, st.session_state.lon],
-        tooltip="Текущее местоположение",
-        popup=f"Широта: {st.session_state.lat:.6f}<br>Долгота: {st.session_state.lon:.6f}",
-        icon=folium.Icon(color="green", icon="ok-sign", prefix="fa")
-    ).add_to(m)
-    
-    # Добавляем круг для лучшей видимости
-    folium.CircleMarker(
-        location=[st.session_state.lat, st.session_state.lon],
-        radius=8,
-        popup="Выбранная точка",
-        color="#3186cc",
-        fill=True,
-        fill_color="#3186cc"
-    ).add_to(m)
-    
-    # Инструкция для пользователя
-    folium.Marker(
-        [st.session_state.lat + 0.05, st.session_state.lon],
-        icon=folium.DivIcon(
-            html='<div style="font-size: 14px; color: black; background: white; padding: 5px; border-radius: 5px;">⬅️ Нажмите на карту для выбора нового местоположения</div>'
-        )
-    ).add_to(m)
-    
-    # Отображаем карту и получаем события
-    map_data = st_folium(
-        m, 
-        width=700, 
-        height=500,
-        key="location_map"
-    )
-    
-    # Обрабатываем клик по карте
-    if map_data and map_data.get("last_clicked"):
-        clicked_lat = map_data["last_clicked"]["lat"]
-        clicked_lon = map_data["last_clicked"]["lng"]
-        
-        # Обновляем координаты в session state
-        st.session_state.lat = clicked_lat
-        st.session_state.lon = clicked_lon
-        st.session_state.map_clicked = True
-        
-        # Обновляем числовые поля
-        st.rerun()
+# Добавляем красный маркер текущего местоположения
+folium.Marker(
+    [st.session_state.lat, st.session_state.lon],
+    icon=folium.Icon(color="red", icon="circle", prefix="fa")
+).add_to(m)
 
-with col_info:
-    st.subheader("📍 Текущее местоположение")
-    st.success(f"**Широта:** {st.session_state.lat:.6f}")
-    st.success(f"**Долгота:** {st.session_state.lon:.6f}")
+# Расчет направления стрелки
+angle_rad = math.radians(azimuth)
+lat_offset = round(0.001 * math.cos(angle_rad), 6)
+lon_offset = round(0.001 * math.sin(angle_rad), 6)
+
+# Стрелка направления панелей
+folium.PolyLine(
+    locations=[
+        [st.session_state.lat, st.session_state.lon], 
+        [st.session_state.lat + lat_offset, st.session_state.lon + lon_offset]
+    ],
+    color="blue",
+    weight=4,
+    opacity=0.8
+).add_to(m)
+
+# Отображаем карту и получаем события
+map_data = st_folium(
+    m, 
+    width=800, 
+    height=500,
+    key="main_map"
+)
+
+# Обрабатываем клик по карте
+if map_data and map_data.get("last_clicked"):
+    clicked_lat = map_data["last_clicked"]["lat"]
+    clicked_lon = map_data["last_clicked"]["lng"]
     
+    # Обновляем координаты в session state
+    st.session_state.lat = clicked_lat
+    st.session_state.lon = clicked_lon
+    st.rerun()
+
+# Информация о местоположении
+col1, col2, col3 = st.columns(3)
+with col1:
+    st.info(f"**Широта:** {st.session_state.lat:.6f}")
+with col2:
+    st.info(f"**Долгота:** {st.session_state.lon:.6f}")
+with col3:
     # Определяем ближайший город
     min_distance = float('inf')
     nearest_city = "Не определен"
-    
     for city, (city_lat, city_lon) in cities.items():
         distance = math.sqrt((st.session_state.lat - city_lat)**2 + (st.session_state.lon - city_lon)**2)
         if distance < min_distance:
             min_distance = distance
             nearest_city = city
-    
     st.info(f"**Ближайший город:** {nearest_city}")
-    
-    # Кнопка для сброса к Полтаве
-    if st.button("🔄 Сбросить к Полтаве"):
-        st.session_state.lat = 49.5883
-        st.session_state.lon = 34.5514
-        st.session_state.map_clicked = False
-        st.rerun()
-    
-    st.markdown("---")
-    st.write("**Инструкция:**")
-    st.write("1. Нажмите на карту слева для выбора местоположения")
-    st.write("2. Или выберите город из списка в боковой панели")
-    st.write("3. Или введите координаты вручную")
 
 # ===== ИНДИКАТОР ЗАГРУЗКИ =====
 st.header("⚡ Расчет солнечной генерации")
@@ -326,65 +296,6 @@ periods_data = calculate_periods_generation(df_hourly, peak_power) if df_hourly 
 
 # ===== ОТОБРАЖЕНИЕ РЕЗУЛЬТАТОВ =====
 if periods_data is not None:
-    # ===== КАРТА С НАПРАВЛЕНИЕМ ПАНЕЛЕЙ =====
-    st.header("🎯 Ориентация солнечных панелей")
-    
-    # Создаем карту с направлением
-    m_direction = folium.Map(
-        location=[st.session_state.lat, st.session_state.lon], 
-        zoom_start=15
-    )
-    
-    # Расчет направления стрелки
-    angle_rad = math.radians(azimuth)
-    lat_offset = round(0.001 * math.cos(angle_rad), 6)
-    lon_offset = round(0.001 * math.sin(angle_rad), 6)
-    
-    # Маркер установки
-    folium.Marker(
-        [st.session_state.lat, st.session_state.lon],
-        tooltip=f"Установка: {direction}, {tilt}°",
-        popup=f"""
-        <b>Параметры системы:</b><br>
-        Мощность: {peak_power} кВт<br>
-        Направление: {direction}<br>
-        Наклон: {tilt}°<br>
-        Координаты: {st.session_state.lat:.6f}, {st.session_state.lon:.6f}<br>
-        Год данных: {selected_year}
-        """,
-        icon=folium.Icon(color="blue", icon="screenshot", prefix="fa")
-    ).add_to(m_direction)
-    
-    # Стрелка направления панелей
-    folium.PolyLine(
-        locations=[
-            [st.session_state.lat, st.session_state.lon], 
-            [st.session_state.lat + lat_offset, st.session_state.lon + lon_offset]
-        ],
-        color="red",
-        weight=5,
-        tooltip=f"Направление панелей: {direction}",
-        opacity=0.8
-    ).add_to(m_direction)
-    
-    # Добавляем компас
-    folium.CircleMarker(
-        location=[st.session_state.lat - 0.0005, st.session_state.lon],
-        radius=3,
-        popup="N - Север",
-        color="black",
-        fill=True
-    ).add_to(m_direction)
-    
-    folium.Marker(
-        [st.session_state.lat - 0.0005, st.session_state.lon],
-        icon=folium.DivIcon(
-            html='<div style="font-size: 12px; color: black; font-weight: bold;">N</div>'
-        )
-    ).add_to(m_direction)
-    
-    st_folium(m_direction, width=800, height=400)
-    
     # ===== СВОДКА ПОКАЗАТЕЛЕЙ =====
     st.header("📊 Сводка генерации")
     
@@ -454,8 +365,132 @@ if periods_data is not None:
         plt.tight_layout()
         st.pyplot(fig_year)
         
-    # Остальные вкладки остаются без изменений...
-    # [Код для остальных вкладок остается таким же как в предыдущей версии]
+        # Таблица годовых данных
+        display_monthly = monthly_data[['month_name', 'power_kwh', 'G(i)']].rename(
+            columns={
+                'month_name': 'Месяц', 
+                'power_kwh': 'Генерация (кВт·ч)',
+                'G(i)': 'Средняя радиация (Вт/м²)'
+            }
+        )
+        st.dataframe(display_monthly, hide_index=True, use_container_width=True)
+    
+    with tab2:
+        st.subheader(f"Месячная генерация - {selected_year} год")
+        
+        # Выбор месяца для детального анализа
+        selected_month = st.selectbox("Выберите месяц:", months_ru, key="month_selector")
+        month_num = months_ru.index(selected_month) + 1
+        
+        # Данные за выбранный месяц
+        month_data = periods_data['raw_data'][periods_data['raw_data']['month'] == month_num]
+        daily_month = month_data.groupby('date').agg({
+            'power_kwh': 'sum',
+            'G(i)': 'mean'
+        }).reset_index()
+        
+        fig_month, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
+        
+        # Дневная генерация в месяце
+        ax1.plot(daily_month['date'], daily_month['power_kwh'], 'o-', linewidth=2, markersize=4, color='blue')
+        ax1.set_title(f'Дневная генерация - {selected_month} {selected_year}')
+        ax1.set_ylabel('кВт·ч/день')
+        ax1.grid(True, alpha=0.3)
+        ax1.tick_params(axis='x', rotation=45)
+        
+        # Средняя часовая генерация по дням месяца
+        hourly_avg = month_data.groupby('hour').agg({
+            'power_kwh': 'mean',
+            'G(i)': 'mean'
+        }).reset_index()
+        
+        ax2.bar(hourly_avg['hour'], hourly_avg['power_kwh'], alpha=0.7, color='orange')
+        ax2.set_title(f'Средняя часовая генерация - {selected_month} {selected_year}')
+        ax2.set_xlabel('Час дня')
+        ax2.set_ylabel('кВт·ч/час')
+        ax2.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        st.pyplot(fig_month)
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric(f"Общая генерация за {selected_month}", f"{daily_month['power_kwh'].sum():.0f} кВт·ч")
+        with col2:
+            st.metric(f"Средняя дневная генерация", f"{daily_month['power_kwh'].mean():.1f} кВт·ч")
+    
+    with tab3:
+        st.subheader(f"Недельная генерация - {selected_year} год")
+        
+        fig_week, ax = plt.subplots(figsize=(12, 6))
+        
+        weekly_data = periods_data['weekly'].copy()
+        
+        ax.bar(weekly_data['week'], weekly_data['power_kwh'], alpha=0.7, color='green')
+        ax.set_title(f'Недельная генерация - {selected_year} год')
+        ax.set_xlabel('Номер недели')
+        ax.set_ylabel('кВт·ч/неделю')
+        ax.grid(True, alpha=0.3)
+        
+        # Добавляем линию тренда
+        z = np.polyfit(weekly_data['week'], weekly_data['power_kwh'], 2)
+        p = np.poly1d(z)
+        ax.plot(weekly_data['week'], p(weekly_data['week']), "r--", alpha=0.8, linewidth=2)
+        
+        plt.tight_layout()
+        st.pyplot(fig_week)
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Максимальная неделя", f"{weekly_data['power_kwh'].max():.0f} кВт·ч")
+        with col2:
+            st.metric("Минимальная неделя", f"{weekly_data['power_kwh'].min():.0f} кВт·ч")
+        with col3:
+            st.metric("Стандартное отклонение", f"{weekly_data['power_kwh'].std():.0f} кВт·ч")
+    
+    with tab4:
+        st.subheader(f"Суточная и почасовая генерация - {selected_year} год")
+        
+        # Выбор дня для детального анализа
+        available_dates = periods_data['daily']['date'].unique()
+        if len(available_dates) > 0:
+            selected_date = st.selectbox("Выберите дату:", available_dates[:10])
+            
+            # Данные за выбранный день
+            day_data = periods_data['raw_data'][periods_data['raw_data']['date'] == selected_date]
+            
+            fig_day, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
+            
+            # Почасовая генерация
+            ax1.bar(day_data['hour'], day_data['power_kwh'], alpha=0.7, color='red')
+            ax1.set_title(f'Почасовая генерация - {selected_date}')
+            ax1.set_xlabel('Час дня')
+            ax1.set_ylabel('кВт·ч/час')
+            ax1.grid(True, alpha=0.3)
+            
+            # Накопительная генерация за день
+            cumulative = day_data['power_kwh'].cumsum()
+            ax2.plot(day_data['hour'], cumulative, 'o-', linewidth=2, color='purple', markersize=4)
+            ax2.set_title(f'Накопительная генерация - {selected_date}')
+            ax2.set_xlabel('Час дня')
+            ax2.set_ylabel('кВт·ч (накопит.)')
+            ax2.grid(True, alpha=0.3)
+            ax2.fill_between(day_data['hour'], cumulative, alpha=0.3, color='purple')
+            
+            plt.tight_layout()
+            st.pyplot(fig_day)
+            
+            total_day = day_data['power_kwh'].sum()
+            if len(day_data) > 0:
+                peak_hour = day_data.loc[day_data['power_kwh'].idxmax()]
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Общая дневная генерация", f"{total_day:.1f} кВт·ч")
+                with col2:
+                    st.metric("Пиковый час", f"Час {int(peak_hour['hour'])}:00")
+                with col3:
+                    st.metric("Пиковая мощность", f"{peak_hour['power_kwh']:.2f} кВт·ч")
 
 else:
     st.error("❌ Не удалось получить данные от PVGIS. Проверьте параметры и подключение к интернету.")
