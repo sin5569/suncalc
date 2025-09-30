@@ -33,20 +33,26 @@ st.header("⚡ Параметры панели")
 peak_power = st.number_input("Установленная мощность системы (кВт)", value=5.0)
 tilt = st.slider("Угол наклона панели (°)", 0, 90, 30)
 
-# ===== Запрос данных PVGIS с учетом направления панели =====
-@st.cache_data(show_spinner=True)
+# ===== Функция запроса данных PVGIS =====
 def get_pvgis_data(lat, lon, tilt, peak_power, azimuth):
     url = (
         f"https://re.jrc.ec.europa.eu/api/PVcalc?"
         f"lat={lat}&lon={lon}&peakpower={peak_power}&loss=14&angle={tilt}&azimuth={azimuth}&outputformat=json"
     )
-    response = requests.get(url)
-    if response.status_code == 200:
-        return response.json()
-    return None
+    try:
+        response = requests.get(url, timeout=15)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"Ошибка PVGIS API: {response.status_code}")
+            return None
+    except requests.exceptions.RequestException as e:
+        st.error(f"Ошибка запроса к PVGIS: {e}")
+        return None
 
 data = get_pvgis_data(lat, lon, tilt, peak_power, azimuth)
 
+# ===== Обработка данных PVGIS =====
 def parse_pvgis_data(data):
     if not data or "outputs" not in data:
         return None
@@ -68,7 +74,7 @@ if df is not None:
     fig, ax = plt.subplots()
     ax.bar(df["month"], df["E_m"], color="orange")
     ax.set_ylabel("Выработка (кВт·ч/мес)")
-    ax.set_title("Солнечная генерация с учётом ориентации и наклона")
+    ax.set_title(f"Генерация для направления {direction}, наклон {tilt}°")
     st.pyplot(fig)
 
     total = df["E_m"].sum()
@@ -82,7 +88,7 @@ st.subheader("🗺️ Местоположение и направление п�
 angle_deg = azimuth
 angle_rad = math.radians(angle_deg)
 
-# смещение стрелки (~100 м), с точностью до 6 знаков
+# смещение стрелки (~100 м)
 lat_offset = round(0.001 * math.cos(angle_rad), 6)
 lon_offset = round(0.001 * math.sin(angle_rad), 6)
 
